@@ -1,0 +1,14 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+
+eggs/
+.eggs/
+*.egg-info/
+*.egg
+
+.vscode/
