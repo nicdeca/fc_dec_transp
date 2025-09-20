@@ -200,8 +200,6 @@ class ConfigController:
             self.dfc_model_.getJqi(), y, self.dfc_model_.getJalphai()
         )
 
-        # Optionally: store or return control outputs as needed
-        # self.fdes_ = fperp.copy()  # Example: store the computed force
 
         self.uipa_ = uiparpa + fperp
         self.fdes_ = self.uipa_ + uidynapar - self.kdamp_ * drone_state.v

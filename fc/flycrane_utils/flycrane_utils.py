@@ -23,6 +23,7 @@ class FCParams:
     Lrho2: attachment point 2 position in load frame (3-vector)
     Lrhoi: midpoint attachment position in load frame (3-vector)
     Lci: base direction vector in load frame (3-vector)
+    doffset: offset vector in drone body frame of the cable attachment point (3-vector)
     """
     beta: float = 0.0
     l: float = 0.0
@@ -30,6 +31,7 @@ class FCParams:
     Lrho2: np.ndarray = np.zeros(3)
     Lrho: np.ndarray = np.zeros(3)
     Lc: np.ndarray = np.zeros(3)
+    doffset: np.ndarray = np.zeros(3)  
 
 
 @dataclass
@@ -58,17 +60,17 @@ class FCCableState:
 # -----------------------
 # Kinematic conversions
 # -----------------------
-def dronepos2attachpos(pi: np.ndarray, Ri: R, doffset: np.ndarray) -> np.ndarray:
+def dronepos2attachpos(pi: np.ndarray, Ri: np.ndarray, doffset: np.ndarray) -> np.ndarray:
     """
     pi: (3,) world frame
-    Ri: drone orientation as a scipy Rotation
+    Ri: drone rotation matrix
     doffset: (3,) vector in drone body frame (attach point relative to drone origin)
     returns: attach position in world frame
     """
-    return pi + Ri.apply( doffset )
+    return pi + Ri @ doffset
 
 
-def dronevel2attachvel(drone_vel: np.ndarray, Ri: R, drone_body_omega: np.ndarray,
+def dronevel2attachvel(drone_vel: np.ndarray, Ri: np.ndarray, drone_body_omega: np.ndarray,
                        doffset: np.ndarray) -> np.ndarray:
     """
     drone_vel: (3,) linear velocity of drone in world frame
@@ -78,18 +80,18 @@ def dronevel2attachvel(drone_vel: np.ndarray, Ri: R, drone_body_omega: np.ndarra
     returns: attach point linear velocity in world frame
     """
     # angular velocity in world frame = R * body_omega
-    omega_world = Ri.apply( drone_body_omega )
-    return drone_vel + np.cross(omega_world, Ri.apply( doffset ))
+    omega_world = Ri @ drone_body_omega
+    return drone_vel + np.cross(omega_world, Ri @ doffset)
 
 
-def attachpos2dronepos(attach_pos: np.ndarray, Ri: R, doffset: np.ndarray) -> np.ndarray:
-    return attach_pos - Ri.apply( doffset )
+def attachpos2dronepos(attach_pos: np.ndarray, Ri: np.ndarray, doffset: np.ndarray) -> np.ndarray:
+    return attach_pos - Ri @ doffset
 
 
-def attachvel2dronevel(attach_vel: np.ndarray, Ri: R, drone_body_omega: np.ndarray,
+def attachvel2dronevel(attach_vel: np.ndarray, Ri: np.ndarray, drone_body_omega: np.ndarray,
                        doffset: np.ndarray) -> np.ndarray:
-    omega_world = Ri.apply( drone_body_omega )
-    return attach_vel - np.cross(omega_world, Ri.apply( doffset ))
+    omega_world = Ri @ drone_body_omega
+    return attach_vel - np.cross(omega_world, Ri @ doffset)
 
 
 # -----------------------

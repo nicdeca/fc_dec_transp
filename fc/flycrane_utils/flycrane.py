@@ -69,7 +69,7 @@ class FlyCrane:
     N : int
         Number of cables/drones.
     """
-    def __init__(self, dt: float = 0.001, use_input_forces: bool = False):
+    def __init__(self, dt: float = 0.001, use_input_forces: bool = True):
         """
         Initialize the FlyCrane system.
 
@@ -160,6 +160,7 @@ class FlyCrane:
         self.integrateDynamicsLoad()
         for i in range(self.N):
             self.integrateDynamicsCable(i)
+
 
         self.iter_count += 1
 
@@ -299,7 +300,7 @@ class FlyCrane:
         self.cable_state[i].omega += self.cable_state[i].domega * self.dt
 
     # ========================= Initialization =========================
-    def setFCParameters(self, N: int, Lrho1: list[np.ndarray], Lrho2: list[np.ndarray], l: list[float]) -> None:
+    def setFCParameters(self, N: int, Lrho1: list[np.ndarray], Lrho2: list[np.ndarray], l: list[float], doffset: list[np.ndarray]|None=None) -> None:
         """
         Set the parameters for the fly crane system.
 
@@ -313,6 +314,8 @@ class FlyCrane:
             Second set of cable attachment points.
         l : list[float]
             Lengths of the cables.
+        doffset : list[np.ndarray]|None
+            Offset vectors in drone body frame for each cable attachment point.
         """
         if N <= 0:
             raise ValueError("Number of cables must be positive")
@@ -321,6 +324,11 @@ class FlyCrane:
 
         self.N = N
 
+        if doffset is not None:
+            if len(doffset) != N:
+                raise ValueError("doffset must have the same size as N")
+        else:
+            doffset = [np.zeros(3) for _ in range(N)]
 
         # Clear previous parameters to avoid accumulation
         self.fc_params.clear()
@@ -340,6 +348,8 @@ class FlyCrane:
             self.fc_params[i].beta = np.arccos(chord_length / (self.CHORD_FACTOR * l[i]))
             self.fc_params[i].Lrho = (Lrho1[i] + Lrho2[i]) / 2.0
             self.fc_params[i].Lc = Lrho12 / chord_length
+
+            self.fc_params[i].doffset = doffset[i]
 
         self.initializeVariables()
         self.FCPARAMETERS_INITIALIZED = True
@@ -475,6 +485,14 @@ class FlyCrane:
             self.cable_state[i].omega = omega_alpha[i]
 
     # ================== Getters ==================
+    def getDynamicParameters(self) -> tuple[float, np.ndarray, list[float]]:
+        """Get the current dynamic parameters: load mass, inertia, and robot masses."""
+        return self.ml, self.Jl.copy(), copy.deepcopy(self.mR)
+
+    def getFCParameters(self) -> list[FCParams]:
+        """Get the current FlyCrane parameters."""
+        return copy.deepcopy(self.fc_params)
+    
     def getLoadState(self) -> BodyState:
         """Get the current load state."""
         return copy.deepcopy(self.load_state)

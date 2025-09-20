@@ -167,3 +167,4 @@ def test_flycrane_compute_from_instance():
 
 if __name__ == "__main__":
     test_flycrane_compute_from_instance()  # Run the test function directly
+    print("All tests passed.")
