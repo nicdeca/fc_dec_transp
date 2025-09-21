@@ -8,47 +8,56 @@ from fc.flycrane_utils.dec_flycrane_model import DFlyCraneModel
 from fc.dec_controller.config_controller import ConfigController
 from fc.dec_controller.dynamic_allocator import DynamicAllocator
 from fc.dec_controller.wrench_observer import WrenchObserver
+from fc.traj_generation.traj_generation import TrajectoryGenerator, OrientationTrajectoryGenerator
+from fc.plot_utils.animate_flycrane import animate_flycrane
 
 # =================== Constants ===================
-GRAVITY = 9.81
-DT_DEFAULT = 0.001
-T_DEFAULT = 5.0
-N_DRONES = 3
-THRUST_MAX = 20.06
-KDELTA = 100.0
-KGRAD = 1.0
-KLAMBDAP = 0.1
-KLAMBDAR = 0.1
-RHOP = 20.0
-RHOR = 20.0
-DUMAX = 2.0
-KREG = 0.1
-TMIN = 0.05
-ALPHAF = 100.0
-ALPHAFPOW = 3
-ALPHAT = 5.0
-ALPHATPOW = 1
-KOBS_F = 20.0
-KOBS_TAU = 20.0
-KP_P = 2.5
-KD_P = 1.0
-KPA = 2.0
-KDA = 1.0
-KPYAW = 2.0
-KDYAW = 1.0
+# Simulation parameters
+DT_DEFAULT = 0.001   # Default time step (s)
+T_DEFAULT = 5.0      # Default simulation time (s)
+GRAVITY = 9.81      # Gravity (m/s^2)
+N_DRONES = 3         # Number of drones
+USE_OFFSET = True  # Use drone offset in simulation
+# Drone parameters
+THRUST_MAX = 20.06   # Maximum thrust (N)
+# Dynamic allocator parameters
+KDELTA = 100.0      # Control gain for delta
+KGRAD = 1.0         # Control gain for gradient
+KLAMBDAP = 0.1      # Control gain for lambda position
+KLAMBDAR = 0.1      # Control gain for lambda rotation
+RHOP = 20.0         # Density of payload (kg/m^3)
+RHOR = 20.0         # Density of rope (kg/m^3)
+DUMAX = 2.0         # Maximum drone velocity (m/s)
+KREG = 0.1         # Control gain for position regulation
+TMIN = 0.05        # Minimum thrust (N)
+ALPHAF = 100.0    # Control gain for alpha feedforward
+ALPHAFPOW = 3     # Power for alpha feedforward
+ALPHAT = 5.0      # Control gain for alpha thrust
+ALPHATPOW = 1     # Power for alpha thrust
+# Wrench observer parameters
+KOBS_F = 20.0     # Control gain for observer force
+KOBS_TAU = 20.0   # Control gain for observer torque
+# Dec Load Pose Controller parameters
+KP_P = 2.5        # Control gain for position
+KD_P = 1.0        # Control gain for position derivative
+KPA = 2.0        # Control gain for acceleration
+KDA = 1.0        # Control gain for acceleration derivative
+KPYAW = 2.0     # Control gain for yaw position
+KDYAW = 1.0     # Control gain for yaw derivative
 KP_R = np.diag([KPA, KPA, KPYAW])
 KD_R = np.diag([KDA, KDA, KDYAW])
-KI_P = 0.0
-EP_MAX = 0.3
-ER_MAX = 0.3
-EV_MAX = 0.3
-EOXY_MAX = 0.3
-EOZ_MAX = 0.3
-EI_MAX = 2.5
-KDAMP = 0.1
-KDAMP_ALPHA = 0.1
-KPALPHA = 3.0
-KDALPHA = 0.02
+KI_P = 0.0       # Integral gain for position
+EP_MAX = 0.3     # Maximum position error (m)
+ER_MAX = 0.3     # Maximum rotation error (rad)
+EV_MAX = 0.3     # Maximum velocity error (m/s)
+EOXY_MAX = 0.3   # Maximum XY position error (m)
+EOZ_MAX = 0.3    # Maximum Z position error (m)
+EI_MAX = 2.5     # Maximum integral error
+KDAMP = 0.1      # Damping gain
+# FCCableController parameters
+KDAMP_ALPHA = 0.1 # Damping gain for alpha
+KPALPHA = 3.0    # Control gain for alpha position
+KDALPHA = 0.02   # Control gain for alpha position derivative
 
 
 
@@ -59,7 +68,10 @@ def create_initial_conditions(dt: float = DT_DEFAULT) -> Tuple[FlyCrane, BodySta
     Lrho1 = [np.array([0.0866, 0.45, 0.0]), np.array([-0.433, -0.15, 0.0]), np.array([0.3464, -0.3, 0.0])]
     Lrho2 = [np.array([-0.433, 0.15, 0.0]), np.array([0.0866, -0.45, 0.0]), np.array([0.3464, 0.3, 0.0])]
     l = [1.0, 1.0, 1.0]
-    doffset = [np.zeros(3), np.zeros(3), np.zeros(3)]
+    if USE_OFFSET:
+        doffset = [np.array([0.0, 0.0, -0.1]), np.array([0.0, 0.0, -0.1]), np.array([0.0, 0.0, -0.1])]
+    else:
+        doffset = [np.zeros(3), np.zeros(3), np.zeros(3)]
     ml = 0.38
     Jl = np.array([[0.0154, 0.0, 0.0], [0.0, 0.0154, 0.0], [0.0, 0.0, 0.0306]])
     mR = [1.145, 1.145, 1.145]
@@ -68,11 +80,11 @@ def create_initial_conditions(dt: float = DT_DEFAULT) -> Tuple[FlyCrane, BodySta
     alpha0 = np.array([0.7854, 0.7854, 0.7854])
 
     des_load_state = BodyState()
-    des_load_state.p = np.array([0.0, 0.0, 2.0])
-    des_load_state.quat = np.array([0.0, 0.0, 0.0, 1.0])
-    des_load_state.R = np.eye(3)
-    des_load_state.v = np.zeros(3)
-    des_load_state.world_omega = np.zeros(3)
+    des_load_state.p = np.array([0.0, 0.0, 2.0], dtype=np.float64).reshape((3,))
+    des_load_state.quat = np.array([0.0, 0.0, 0.0, 1.0], dtype=np.float64).reshape((4,))
+    des_load_state.R = np.eye(3, dtype=np.float64)
+    des_load_state.v = np.zeros(3, dtype=np.float64)
+    des_load_state.world_omega = np.zeros(3, dtype=np.float64)
 
     des_cable_state = []
     for a, o, d in zip(alpha0, [0.0]*N_DRONES, [0.0]*N_DRONES):
@@ -142,8 +154,29 @@ def init_wrench_observer(wrench_observer: WrenchObserver, flycrane: FlyCrane, dr
     ml, _, _ = flycrane.getDynamicParameters()
     wrench_observer.set_params(KOBS_F, KOBS_TAU, flycrane.dt, ml)
 
+def define_desired_trajectory(T: float, p0: np.ndarray) -> TrajectoryGenerator:
+    """
+    Define the desired trajectory for the load using B-splines.
+    """
+    waypoints = np.array([
+        [p0[0], p0[1], p0[2]],
+        [p0[0] + 0.5, p0[1] + 0.5, p0[2] + 0.5],
+        [p0[0] + 1.0, p0[1] + 1.0, p0[2] + 1.0]
+    ])
+    times = np.array([0.0, T / 2, T])
+    p = 5
+    n_der_conds = 2
+    der_conds = np.zeros((2 * n_der_conds, waypoints.shape[1]))
+    traj_gen = TrajectoryGenerator.from_waypoints(
+        waypoints=waypoints,
+        times=times,
+        n_der_conds=n_der_conds,
+        p=p,
+        der_conds=der_conds
+    )
+    return traj_gen
 
-def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[FlyCrane, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     """
     Run the FlyCrane decentralized dynamic allocation simulation.
     Returns:
@@ -152,6 +185,12 @@ def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[np.nda
         time_log: np.ndarray - Time vector
     """
     flycrane, des_load_state, des_cable_state, dflycrane_list = create_initial_conditions(dt=dt)
+
+    load_state = flycrane.getLoadState()
+    drone_state = flycrane.getDronesStates()
+    drone_attaching_state = [BodyState() for _ in range(flycrane.N)]
+
+    traj_gen = define_desired_trajectory(T, load_state.p)
 
     # Controllers
     config_controller = [ConfigController() for _ in range(flycrane.N)]
@@ -166,19 +205,28 @@ def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[np.nda
     n_steps = int(T / dt)
     traj_p = np.zeros((n_steps, 3), dtype=np.float64)   # Load position
     traj_pd = np.zeros((n_steps, 3), dtype=np.float64)  # Desired position
+    traj_quat = np.zeros((n_steps, 4), dtype=np.float64)  # Load orientation (quaternion)
+    traj_quatd = np.zeros((n_steps, 4), dtype=np.float64)  # Desired orientation (quaternion)
+    traj_omega_d = np.zeros((n_steps, 3), dtype=np.float64)  # Desired angular velocity
+    traj_alpha = [np.zeros((n_steps), dtype=np.float64) for _ in range(flycrane.N)]  # Cable angles
+    traj_alpha_d = [np.zeros((n_steps), dtype=np.float64) for _ in range(flycrane.N)]  # Desired cable angles
+    traj_fdes = [np.zeros((n_steps, 3), dtype=np.float64) for _ in range(flycrane.N)]  # Commanded forces
+    traj_fperp = [np.zeros((n_steps, 3), dtype=np.float64) for _ in range(flycrane.N)]  # Perpendicular forces
+    traj_pD = [np.zeros((n_steps, 3), dtype=np.float64) for _ in range(flycrane.N)]  # Drone positions
+    traj_quatD = [np.zeros((n_steps, 4), dtype=np.float64) for _ in range(flycrane.N)]  # Drone orientations
     time_log = np.zeros(n_steps, dtype=np.float64)
 
     uidynapar = [np.zeros(3) for _ in range(flycrane.N)]
     f = [np.zeros(3) for _ in range(flycrane.N)]
     wlhat = [np.zeros(6) for _ in range(flycrane.N)]
 
-    load_state = flycrane.getLoadState()
-    # Here, it should be getDroneStates, but for the moment it is getDroneAttachingStates
-    drone_state = flycrane.getDroneAttachingStates()
-    drone_attaching_state = [BodyState() for _ in range(flycrane.N)]
 
     for kk in range(n_steps):
         t = kk * dt
+
+        # Update desired trajectory
+        des_load_state.p, des_load_state.v, des_load_state.a, _ = traj_gen.evaluate(t)
+        
 
         for i in range(flycrane.N):
             dflycrane_list[i].updateModel(drone_state[i], load_state)
@@ -212,26 +260,91 @@ def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[np.nda
 
             wlhat[i] = wrench_observer[i].get_wlhat()
 
+            # Store trajectory
+            traj_alpha[i][kk] = cable_state.alpha
+            traj_alpha_d[i][kk] = des_cable_state[i].alpha
+            traj_fdes[i][kk, :] = f[i]
+            traj_pD[i][kk, :] = drone_state[i].p
+            traj_quatD[i][kk, :] = drone_state[i].quat
+            traj_fperp[i][kk, :] = config_controller[i].getFperp()
+
 
         # Simulate dynamics for one time step
         flycrane.simulateDynamics(f)
 
         load_state = flycrane.getLoadState()
         # Later flycrane should be changed to add the offset and here getDroneStates
-        drone_state = flycrane.getDroneAttachingStates()
+        drone_state = flycrane.getDronesStates()
 
         # Store trajectory
         traj_p[kk, :] = load_state.p
         traj_pd[kk, :] = des_load_state.p
+        traj_quat[kk, :] = load_state.quat
+        traj_quatd[kk, :] = des_load_state.quat
+        traj_omega_d[kk, :] = des_load_state.world_omega
+
+            
         time_log[kk] = t
 
-    return traj_p, traj_pd, time_log
+    return flycrane, traj_p, traj_pd, time_log, traj_quat, traj_quatd, traj_omega_d, traj_alpha, traj_alpha_d, traj_fdes, traj_fperp, traj_pD, traj_quatD
+
 
 
 def main():
-    dt = 0.001
-    Tsim = 5.0
-    traj_p, traj_pd, time_log = run_simulation(T=Tsim, dt=dt)
+    dt = DT_DEFAULT
+    Tsim = T_DEFAULT
+
+    flycrane, traj_p, traj_pd, time_log, traj_quat, traj_quatd, traj_omega_d, traj_alpha, traj_alpha_d, traj_fdes, traj_fperp, traj_pD, traj_quatD = run_simulation(T=Tsim, dt=dt)
+    # (
+    #     traj_p, traj_pd, time_log, traj_quat, traj_quatd, traj_omega_d, traj_alpha_d,
+    #     alpha_hist, fdes_hist, fperp_hist, pD_hist, quatD_hist, params
+    # ) = run_simulation(T=Tsim, dt=dt)
+    # Plot desired orientation (Euler angles), angular velocity, and acceleration
+    # from scipy.spatial.transform import Rotation as R
+    # eulers_d = R.from_quat(traj_quatd).as_euler('xyz', degrees=True)
+    # plt.figure()
+    # plt.plot(time_log, eulers_d[:, 0], label='Roll (deg)')
+    # plt.plot(time_log, eulers_d[:, 1], label='Pitch (deg)')
+    # plt.plot(time_log, eulers_d[:, 2], label='Yaw (deg)')
+    # plt.xlabel('Time [s]')
+    # plt.ylabel('Desired Euler angles (deg)')
+    # plt.legend()
+    # plt.title('Desired Orientation (Euler angles)')
+    # plt.grid()
+    # plt.show()
+
+    # plt.figure()
+    # plt.plot(time_log, traj_omega_d[:, 0], label='wx')
+    # plt.plot(time_log, traj_omega_d[:, 1], label='wy')
+    # plt.plot(time_log, traj_omega_d[:, 2], label='wz')
+    # plt.xlabel('Time [s]')
+    # plt.ylabel('Desired Angular Velocity [rad/s]')
+    # plt.legend()
+    # plt.title('Desired Angular Velocity')
+    # plt.grid()
+    # plt.show()
+
+    # plt.figure()
+    # plt.plot(time_log, traj_alpha_d[:, 0], label='alphax')
+    # plt.plot(time_log, traj_alpha_d[:, 1], label='alphay')
+    # plt.plot(time_log, traj_alpha_d[:, 2], label='alphaz')
+    # plt.xlabel('Time [s]')
+    # plt.ylabel('Desired Angular Acceleration [rad/s²]')
+    # plt.legend()
+    # plt.title('Desired Angular Acceleration')
+    # plt.grid()
+    # plt.show()
+
+    # Plot position and desired position in time
+    plt.figure()
+    plt.plot(time_log, traj_p[:, 0], label="Load X")
+    plt.plot(time_log, traj_p[:, 1], label="Load Y")
+    plt.plot(time_log, traj_p[:, 2], label="Load Z")
+    plt.plot(time_log, traj_pd[:, 0], "--", label="Desired X")
+    plt.plot(time_log, traj_pd[:, 1], "--", label="Desired Y")
+    plt.plot(time_log, traj_pd[:, 2], "--", label="Desired Z")
+    plt.xlabel("Time [s]")
+    plt.ylabel("Position [m]")
 
     # Plot
     fig = plt.figure()
@@ -244,6 +357,35 @@ def main():
     ax.set_title("FlyCrane Load Trajectory vs Desired")
     ax.legend()
     plt.show()
+
+
+    fc_params = flycrane.getFCParameters()
+    arm_length = 0.3
+    rho = []
+    doffset = []
+    l = []
+    for i in range(flycrane.N):
+        rho.append(fc_params[i].Lrho1)
+        rho.append(fc_params[i].Lrho2)
+
+        doffset.append(fc_params[i].doffset)
+        l.append(fc_params[i].l)
+
+
+    params = {
+        "l_arm": 0.3,
+        "rho": rho,  
+        "doffset": doffset,  
+        "l": l,  
+        "alpha_des": traj_alpha_d[0][0]  
+    }
+
+    animate_flycrane(
+        time_log,
+        traj_p, traj_quat, traj_pd, traj_quatd,
+        traj_alpha, traj_fdes, traj_fperp, traj_pD, traj_quatD,
+        params
+    )
 
 
 if __name__ == "__main__":

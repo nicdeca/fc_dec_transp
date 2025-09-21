@@ -9,6 +9,8 @@ from fc.flycrane_utils.flycrane_utils import (
     computeJqiDerivative,
     computeDJalphai,
     computeCableNormal,
+    attachpos2dronepos,
+    attachvel2dronevel,
     FCParams,
     FCCableState,
 )
@@ -504,6 +506,16 @@ class FlyCrane:
     def getDroneAttachingStates(self) -> list[BodyState]:
         """Get the current drone attaching states."""
         return copy.deepcopy(self.drone_attaching_state)
+    
+    def getDronesStates(self) -> list[BodyState]:
+        """Get the current drone states."""
+        drone_state = [BodyState() for _ in range(self.N)]
+        for i in range(self.N):
+            drone_state[i].p = attachpos2dronepos(self.drone_attaching_state[i].p, np.eye(3), self.fc_params[i].doffset)
+            drone_state[i].v = attachvel2dronevel(self.drone_attaching_state[i].v, np.eye(3), np.zeros(3), self.fc_params[i].doffset)
+            drone_state[i].set_orientation_from_quat(self.drone_attaching_state[i].quat)
+            drone_state[i].set_angular_velocity_from_world(self.drone_attaching_state[i].world_omega)
+        return copy.deepcopy(drone_state)
 
     def getDynamicModel(self) -> DynamicModel:
         """Get the current dynamic model."""
