@@ -60,7 +60,7 @@ class BodyState:
         """
         if quat.shape != (4,):
             raise ValueError("Quaternion must be a 4-dimensional vector.")
-        self.quat = quat / np.linalg.norm(quat)  # Normalize the quaternion
+        self.quat = quat.copy() / np.linalg.norm(quat)  # Normalize the quaternion
         rot = R.from_quat(self.quat)
         self.R = rot.as_matrix()
 
@@ -70,8 +70,8 @@ class BodyState:
         """
         if Rmat.shape != (3, 3):
             raise ValueError("Rotation matrix must be 3x3.")
-        self.R = Rmat
-        rot = R.from_matrix(Rmat)
+        self.R = Rmat.copy()
+        rot = R.from_matrix(self.R)
         self.quat = rot.as_quat() / np.linalg.norm(rot.as_quat())
 
     def set_angular_velocity_from_body(self, body_omega: np.ndarray) -> None:
@@ -80,7 +80,7 @@ class BodyState:
         """
         if body_omega.shape != (3,):
             raise ValueError("Angular velocity must be a 3-dimensional vector.")
-        self.body_omega = body_omega
+        self.body_omega = body_omega.copy()
         self.world_omega = self.R @ self.body_omega
 
     def set_angular_velocity_from_world(self, world_omega: np.ndarray) -> None:
@@ -89,5 +89,23 @@ class BodyState:
         """
         if world_omega.shape != (3,):
             raise ValueError("Angular velocity must be a 3-dimensional vector.")
-        self.world_omega = world_omega
+        self.world_omega = world_omega.copy()
         self.body_omega = self.R.T @ self.world_omega
+
+    def set_angular_acceleration_from_body(self, body_domega: np.ndarray) -> None:
+        """
+        Set angular acceleration in body frame and update world frame.
+        """
+        if body_domega.shape != (3,):
+            raise ValueError("Angular acceleration must be a 3-dimensional vector.")
+        self.body_domega = body_domega.copy()
+        self.world_domega = self.R @ self.body_domega
+
+    def set_angular_acceleration_from_world(self, world_domega: np.ndarray) -> None:
+        """
+        Set angular acceleration in world frame and update body frame.
+        """
+        if world_domega.shape != (3,):
+            raise ValueError("Angular acceleration must be a 3-dimensional vector.")
+        self.world_domega = world_domega.copy()
+        self.body_domega = self.R.T @ self.world_domega

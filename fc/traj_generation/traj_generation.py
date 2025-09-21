@@ -4,6 +4,7 @@ from typing import Tuple, Optional
 
 from fc.traj_generation.bspline import BSpline
 
+from scipy.spatial.transform import Slerp
 
 class TrajectoryGenerator:
 
@@ -162,20 +163,8 @@ from scipy.spatial.transform import Rotation as R
 class OrientationTrajectoryGenerator:
     """
     Generates a smooth orientation trajectory using SLERP between quaternion waypoints.
-    Attributes:
-        quats (np.ndarray): Array of quaternions (N, 4) in (x, y, z, w) format.
-        times (np.ndarray): Array of times for each waypoint (N,).
-        t0 (float): Start time.
-        tf (float): End time.
     """
     def __init__(self, quats: np.ndarray, times: np.ndarray) -> None:
-        """
-        Args:
-            quats: Array of quaternions (N, 4) in (x, y, z, w) format.
-            times: Array of times for each waypoint (N,).
-        Raises:
-            ValueError: If input shapes are inconsistent or times not increasing.
-        """
         if quats.shape[0] != times.shape[0]:
             raise ValueError("Number of quaternions and times must match.")
         if quats.shape[1] != 4:
@@ -187,67 +176,52 @@ class OrientationTrajectoryGenerator:
         self.t0 = float(times[0])
         self.tf = float(times[-1])
 
+        # Create one global Slerp object across all keyframes
+        self._slerp = Slerp(self.times, R.from_quat(self.quats))
+
     def evaluate(self, t: float, dt: float = 1e-5) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Evaluate the orientation quaternion, angular velocity, and angular acceleration at time t using SLERP.
-        Args:
-            t: Time value
-            dt: Small time step for finite difference (default: 1e-5)
-        Returns:
-            quat: Quaternion (x, y, z, w) at time t
-            omega: Angular velocity (3,) in body frame at time t
-            alpha: Angular acceleration (3,) (zero vector for SLERP)
         """
-        from scipy.spatial.transform import Slerp
-        # Clamp t to valid range
+        # Clamp to range
         if t <= self.t0:
             quat = self.quats[0]
-            omega = np.zeros(3)
-            alpha = np.zeros(3)
-            return quat, omega, alpha
+            return quat, np.zeros(3), np.zeros(3)
         if t >= self.tf:
             quat = self.quats[-1]
-            omega = np.zeros(3)
-            alpha = np.zeros(3)
-            return quat, omega, alpha
-        # Find segment
-        idx = np.searchsorted(self.times, t) - 1
-        idx = np.clip(idx, 0, len(self.times) - 2, dtype=int)
-        seg_times = self.times[idx:idx+2]
-        seg_rots = R.from_quat(self.quats[idx:idx+2])
-        slerp = Slerp(seg_times, seg_rots)
-        quat = slerp([t]).as_quat()[0]
-        # Angular velocity: finite difference in body frame
+            return quat, np.zeros(3), np.zeros(3)
+
+        # Evaluate quaternion at time t
+        quat = self._slerp([t]).as_quat()[0]
+
+        # Angular velocity via finite difference
         t_prev = max(self.t0, t - dt)
         t_next = min(self.tf, t + dt)
-        q_prev = slerp([t_prev]).as_quat()[0]
-        q_next = slerp([t_next]).as_quat()[0]
+        q_prev = self._slerp([t_prev]).as_quat()[0]
+        q_next = self._slerp([t_next]).as_quat()[0]
+
         r_prev = R.from_quat(q_prev)
         r_next = R.from_quat(q_next)
         r_curr = R.from_quat(quat)
-        # Compute relative rotation from prev to next
+
+        # Relative rotation
         r_rel = r_next * r_prev.inv()
         rotvec = r_rel.as_rotvec() / (t_next - t_prev)
-        # Express in current body frame
+
+        # Express in body frame
         omega = r_curr.inv().apply(rotvec)
-        # For SLERP, angular acceleration is zero (piecewise constant velocity)
+
+        # Angular acceleration assumed zero for SLERP
         alpha = np.zeros(3)
         return quat, omega, alpha
 
     def sample(self, num_points: int = 100) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Sample the orientation trajectory uniformly in time.
-        Args:
-            num_points: Number of sample points
-        Returns:
-            times: Sample times (num_points,)
-            quats: Quaternions (num_points, 4)
-        """
         times = np.linspace(self.t0, self.tf, num_points)
         quats = np.empty((num_points, 4))
         for i, t in enumerate(times):
-            quats[i] = self.evaluate(t)
+            quats[i] = self.evaluate(t)[0]  # only need quaternion
         return times, quats
+
 
 if __name__ == "__main__":
     import matplotlib.pyplot as plt

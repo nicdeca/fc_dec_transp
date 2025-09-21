@@ -11,6 +11,8 @@ from fc.dec_controller.wrench_observer import WrenchObserver
 from fc.traj_generation.traj_generation import TrajectoryGenerator, OrientationTrajectoryGenerator
 from fc.plot_utils.animate_flycrane import animate_flycrane
 
+from scipy.spatial.transform import Rotation as R
+
 # =================== Constants ===================
 # Simulation parameters
 DT_DEFAULT = 0.001   # Default time step (s)
@@ -154,7 +156,7 @@ def init_wrench_observer(wrench_observer: WrenchObserver, flycrane: FlyCrane, dr
     ml, _, _ = flycrane.getDynamicParameters()
     wrench_observer.set_params(KOBS_F, KOBS_TAU, flycrane.dt, ml)
 
-def define_desired_trajectory(T: float, p0: np.ndarray) -> TrajectoryGenerator:
+def define_desired_trajectory(T: float, p0: np.ndarray) -> Tuple[TrajectoryGenerator, OrientationTrajectoryGenerator]:
     """
     Define the desired trajectory for the load using B-splines.
     """
@@ -174,9 +176,21 @@ def define_desired_trajectory(T: float, p0: np.ndarray) -> TrajectoryGenerator:
         p=p,
         der_conds=der_conds
     )
-    return traj_gen
 
-def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[FlyCrane, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
+    quat_waypoints = np.array([
+        R.from_euler('z', 0, degrees=True).as_quat(),
+        R.from_euler('z', 15, degrees=True).as_quat(),
+        R.from_euler('z', 30, degrees=True).as_quat(),
+    ])
+    quat_times = np.array([0.0, T / 2, T])
+
+    quat_traj_gen = OrientationTrajectoryGenerator(
+        quat_waypoints,
+        quat_times,
+    )
+    return traj_gen, quat_traj_gen
+
+def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[FlyCrane, np.ndarray, np.ndarray, np.ndarray,np.ndarray, np.ndarray, np.ndarray, np.ndarray, list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray], list[np.ndarray]]:
     """
     Run the FlyCrane decentralized dynamic allocation simulation.
     Returns:
@@ -190,7 +204,7 @@ def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[FlyCra
     drone_state = flycrane.getDronesStates()
     drone_attaching_state = [BodyState() for _ in range(flycrane.N)]
 
-    traj_gen = define_desired_trajectory(T, load_state.p)
+    traj_gen, quat_traj_gen = define_desired_trajectory(T, load_state.p)
 
     # Controllers
     config_controller = [ConfigController() for _ in range(flycrane.N)]
@@ -207,6 +221,7 @@ def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[FlyCra
     traj_pd = np.zeros((n_steps, 3), dtype=np.float64)  # Desired position
     traj_quat = np.zeros((n_steps, 4), dtype=np.float64)  # Load orientation (quaternion)
     traj_quatd = np.zeros((n_steps, 4), dtype=np.float64)  # Desired orientation (quaternion)
+    traj_omega = np.zeros((n_steps, 3), dtype=np.float64)  # Load angular velocity
     traj_omega_d = np.zeros((n_steps, 3), dtype=np.float64)  # Desired angular velocity
     traj_alpha = [np.zeros((n_steps), dtype=np.float64) for _ in range(flycrane.N)]  # Cable angles
     traj_alpha_d = [np.zeros((n_steps), dtype=np.float64) for _ in range(flycrane.N)]  # Desired cable angles
@@ -226,6 +241,11 @@ def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[FlyCra
 
         # Update desired trajectory
         des_load_state.p, des_load_state.v, des_load_state.a, _ = traj_gen.evaluate(t)
+        quatld, omegald_body, domegald_body = quat_traj_gen.evaluate(t) 
+
+        des_load_state.set_orientation_from_quat(quatld)
+        des_load_state.set_angular_velocity_from_body(omegald_body)
+        des_load_state.set_angular_acceleration_from_body(domegald_body)
         
 
         for i in range(flycrane.N):
@@ -281,82 +301,106 @@ def run_simulation(T: float = T_DEFAULT, dt: float = DT_DEFAULT) -> Tuple[FlyCra
         traj_pd[kk, :] = des_load_state.p
         traj_quat[kk, :] = load_state.quat
         traj_quatd[kk, :] = des_load_state.quat
+        traj_omega[kk, :] = load_state.world_omega
         traj_omega_d[kk, :] = des_load_state.world_omega
 
             
         time_log[kk] = t
 
-    return flycrane, traj_p, traj_pd, time_log, traj_quat, traj_quatd, traj_omega_d, traj_alpha, traj_alpha_d, traj_fdes, traj_fperp, traj_pD, traj_quatD
+    return flycrane, traj_p, traj_pd, time_log, traj_quat, traj_quatd, traj_omega, traj_omega_d, traj_alpha, traj_alpha_d, traj_fdes, traj_fperp, traj_pD, traj_quatD
+
+
+def plot_results(flycrane, time_log, traj_p, traj_pd, traj_quat, traj_quatd,
+                 traj_omega, traj_omega_d, traj_alpha, traj_alpha_d):
+
+    # Convert quaternions to Euler angles (batch conversion is fast)
+    eulers = R.from_quat(traj_quat).as_euler('xyz', degrees=True)
+    eulers_d = R.from_quat(traj_quatd).as_euler('xyz', degrees=True)
+
+    # --- Orientation (Euler angles) ---
+    fig1, ax1 = plt.subplots(figsize=(8, 4))
+    ax1.plot(time_log, eulers[:, 0], label=r'$\phi$')
+    ax1.plot(time_log, eulers[:, 1], label=r'$\theta$')
+    ax1.plot(time_log, eulers[:, 2], label=r'$\psi$')
+    ax1.plot(time_log, eulers_d[:, 0], '--', label=r'$\phi_d$')
+    ax1.plot(time_log, eulers_d[:, 1], '--', label=r'$\theta_d$')
+    ax1.plot(time_log, eulers_d[:, 2], '--', label=r'$\psi_d$')
+    ax1.set_xlabel('Time [s]')
+    ax1.set_ylabel('Euler angles [deg]')
+    ax1.set_title('Load Orientation vs Desired')
+    ax1.grid(True)
+    ax1.legend()
+    fig1.tight_layout()
+
+    # --- Angular Velocity ---
+    fig2, ax2 = plt.subplots(figsize=(8, 4))
+    ax2.plot(time_log, traj_omega[:, 0], label=r'$\omega_x$')
+    ax2.plot(time_log, traj_omega[:, 1], label=r'$\omega_y$')
+    ax2.plot(time_log, traj_omega[:, 2], label=r'$\omega_z$')
+    ax2.plot(time_log, traj_omega_d[:, 0], label=r'$\omega_x$')
+    ax2.plot(time_log, traj_omega_d[:, 1], label=r'$\omega_y$')
+    ax2.plot(time_log, traj_omega_d[:, 2], label=r'$\omega_z$')
+    ax2.set_xlabel('Time [s]')
+    ax2.set_ylabel('Angular velocity [rad/s]')
+    ax2.set_title('Desired Angular Velocity')
+    ax2.grid(True)
+    ax2.legend()
+    fig2.tight_layout()
+
+    # --- Cable Angles ---
+    fig3, ax3 = plt.subplots(figsize=(8, 4))
+    for i in range(flycrane.N):
+        ax3.plot(time_log, traj_alpha[i], label=f'Cable {i+1}')
+        ax3.plot(time_log, traj_alpha_d[i], '--', label=f'Cable {i+1} desired')
+    ax3.set_xlabel('Time [s]')
+    ax3.set_ylabel(r'$\alpha$ [rad]')
+    ax3.set_title('Cable Angles vs Desired')
+    ax3.grid(True)
+    ax3.legend(ncol=2)
+    fig3.tight_layout()
+
+    # --- Load Position ---
+    fig4, ax4 = plt.subplots(figsize=(8, 4))
+    ax4.plot(time_log, traj_p[:, 0], label="Load X")
+    ax4.plot(time_log, traj_p[:, 1], label="Load Y")
+    ax4.plot(time_log, traj_p[:, 2], label="Load Z")
+    ax4.plot(time_log, traj_pd[:, 0], "--", label="Desired X")
+    ax4.plot(time_log, traj_pd[:, 1], "--", label="Desired Y")
+    ax4.plot(time_log, traj_pd[:, 2], "--", label="Desired Z")
+    ax4.set_xlabel("Time [s]")
+    ax4.set_ylabel("Position [m]")
+    ax4.set_title("Load Position vs Desired")
+    ax4.grid(True)
+    ax4.legend()
+    fig4.tight_layout()
+
+    # --- 3D Trajectory ---
+    fig5 = plt.figure(figsize=(7, 6))
+    ax5 = fig5.add_subplot(111, projection="3d")
+    ax5.plot(traj_p[:, 0], traj_p[:, 1], traj_p[:, 2], label="Load")
+    ax5.plot(traj_pd[:, 0], traj_pd[:, 1], traj_pd[:, 2], "--", label="Desired")
+    ax5.set_xlabel("X [m]")
+    ax5.set_ylabel("Y [m]")
+    ax5.set_zlabel("Z [m]")
+    ax5.set_title("3D Trajectory of Load")
+    ax5.legend()
+    fig5.tight_layout()
+
+    plt.show()
+
 
 
 
 def main():
+    plt.rcParams['text.usetex'] = True
+
     dt = DT_DEFAULT
     Tsim = T_DEFAULT
 
-    flycrane, traj_p, traj_pd, time_log, traj_quat, traj_quatd, traj_omega_d, traj_alpha, traj_alpha_d, traj_fdes, traj_fperp, traj_pD, traj_quatD = run_simulation(T=Tsim, dt=dt)
-    # (
-    #     traj_p, traj_pd, time_log, traj_quat, traj_quatd, traj_omega_d, traj_alpha_d,
-    #     alpha_hist, fdes_hist, fperp_hist, pD_hist, quatD_hist, params
-    # ) = run_simulation(T=Tsim, dt=dt)
-    # Plot desired orientation (Euler angles), angular velocity, and acceleration
-    # from scipy.spatial.transform import Rotation as R
-    # eulers_d = R.from_quat(traj_quatd).as_euler('xyz', degrees=True)
-    # plt.figure()
-    # plt.plot(time_log, eulers_d[:, 0], label='Roll (deg)')
-    # plt.plot(time_log, eulers_d[:, 1], label='Pitch (deg)')
-    # plt.plot(time_log, eulers_d[:, 2], label='Yaw (deg)')
-    # plt.xlabel('Time [s]')
-    # plt.ylabel('Desired Euler angles (deg)')
-    # plt.legend()
-    # plt.title('Desired Orientation (Euler angles)')
-    # plt.grid()
-    # plt.show()
+    flycrane, traj_p, traj_pd, time_log, traj_quat, traj_quatd, traj_omega, traj_omega_d, traj_alpha, traj_alpha_d, traj_fdes, traj_fperp, traj_pD, traj_quatD = run_simulation(T=Tsim, dt=dt)
 
-    # plt.figure()
-    # plt.plot(time_log, traj_omega_d[:, 0], label='wx')
-    # plt.plot(time_log, traj_omega_d[:, 1], label='wy')
-    # plt.plot(time_log, traj_omega_d[:, 2], label='wz')
-    # plt.xlabel('Time [s]')
-    # plt.ylabel('Desired Angular Velocity [rad/s]')
-    # plt.legend()
-    # plt.title('Desired Angular Velocity')
-    # plt.grid()
-    # plt.show()
-
-    # plt.figure()
-    # plt.plot(time_log, traj_alpha_d[:, 0], label='alphax')
-    # plt.plot(time_log, traj_alpha_d[:, 1], label='alphay')
-    # plt.plot(time_log, traj_alpha_d[:, 2], label='alphaz')
-    # plt.xlabel('Time [s]')
-    # plt.ylabel('Desired Angular Acceleration [rad/s²]')
-    # plt.legend()
-    # plt.title('Desired Angular Acceleration')
-    # plt.grid()
-    # plt.show()
-
-    # Plot position and desired position in time
-    plt.figure()
-    plt.plot(time_log, traj_p[:, 0], label="Load X")
-    plt.plot(time_log, traj_p[:, 1], label="Load Y")
-    plt.plot(time_log, traj_p[:, 2], label="Load Z")
-    plt.plot(time_log, traj_pd[:, 0], "--", label="Desired X")
-    plt.plot(time_log, traj_pd[:, 1], "--", label="Desired Y")
-    plt.plot(time_log, traj_pd[:, 2], "--", label="Desired Z")
-    plt.xlabel("Time [s]")
-    plt.ylabel("Position [m]")
-
-    # Plot
-    fig = plt.figure()
-    ax = fig.add_subplot(111, projection="3d")
-    ax.plot(traj_p[:, 0], traj_p[:, 1], traj_p[:, 2], label="Load trajectory")
-    ax.plot(traj_pd[:, 0], traj_pd[:, 1], traj_pd[:, 2], "--", label="Desired")
-    ax.set_xlabel("X [m]")
-    ax.set_ylabel("Y [m]")
-    ax.set_zlabel("Z [m]")
-    ax.set_title("FlyCrane Load Trajectory vs Desired")
-    ax.legend()
-    plt.show()
+    plot_results(flycrane, time_log, traj_p, traj_pd, traj_quat, traj_quatd,
+                 traj_omega, traj_omega_d, traj_alpha, traj_alpha_d)
 
 
     fc_params = flycrane.getFCParameters()
@@ -373,7 +417,7 @@ def main():
 
 
     params = {
-        "l_arm": 0.3,
+        "l_arm": arm_length,
         "rho": rho,  
         "doffset": doffset,  
         "l": l,  
