@@ -46,11 +46,12 @@ You should now see `(.venv)` in your terminal prompt.
 
 ---
 
-### 4. Install the package in editable mode
+### 4. Install the package in editable mode and its dependencies
 
 From the repository root (where `setup.py` is located):
 
 ```bash
+pip install -r requirements.txt
 pip install -e .
 ```
 
@@ -72,23 +73,6 @@ Or test the provided example:
 
 ```bash
 python examples/sim_fc_dec_dynalloc.py
-```
-
----
-
-## Dependencies
-
-Dependencies are listed in `setup.py` under `install_requires`.
-To install everything automatically, simply run:
-
-```bash
-pip install -e .
-```
-
-If you also include a `requirements.txt`, you can install dependencies separately:
-
-```bash
-pip install -r requirements.txt
 ```
 
 ---
