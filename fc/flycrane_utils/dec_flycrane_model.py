@@ -66,7 +66,6 @@ class DFlyCraneModel:
 
         self.Jl_: np.ndarray = np.zeros((3, 3))
         self.ml_: float = 0.0
-        self.wgl_: np.ndarray = np.zeros(6)
         self.Comega_: np.ndarray = np.zeros((3, 3))
 
         self.Jqi_: np.ndarray = np.zeros((3, 6))
@@ -264,3 +263,7 @@ class DFlyCraneModel:
     def getdJalphai(self) -> np.ndarray:
         """Return a copy of the dJalphai Jacobian."""
         return self.dJalphai_.copy()
+    
+    def getWgl(self) -> np.ndarray:
+        """Return a copy of the gravity wrench."""
+        return self.dynamic_model_.wgl.copy()

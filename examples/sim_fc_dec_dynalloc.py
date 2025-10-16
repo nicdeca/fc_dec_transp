@@ -180,7 +180,7 @@ def define_desired_trajectory(T: float, p0: np.ndarray) -> Tuple[TrajectoryGener
     quat_waypoints = np.array([
         R.from_euler('z', 0, degrees=True).as_quat(),
         R.from_euler('z', 15, degrees=True).as_quat(),
-        R.from_euler('z', 30, degrees=True).as_quat(),
+        R.from_euler('z', 50, degrees=True).as_quat(),
     ])
     quat_times = np.array([0.0, T / 2, T])
 
